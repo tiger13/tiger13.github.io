@@ -1,0 +1,107 @@
+---
+title: "Prediction of Barbell Lifts from Accelerometer Data"
+author: "tiger13"
+date: "Tuesday, April 19, 2016"
+output: html_document
+---
+
+## Executive Summary
+A boosted tree-based learning method can predict the type of barbell curl performed using data collected from belt, arm, forearm, and dumbbell accelerometer measurements. The data are from this source:
+http://groupware.les.inf.puc-rio.br/har
+
+## Exploratory Data Analysis and Data Set Creation
+```{r, echo=TRUE}
+library(caret)
+dataIn = read.csv('C:/Users/Ron/Documents/DataScience/datasets/PracticalMachineLearning/pml-training.csv')
+```
+
+The data set is large enough to have a training set, test set, and validation set. Make them 60%, 20%, and 20%, respectively, of the input data set.
+
+```{r, echo=TRUE}
+set.seed(2016)
+inTrain = createDataPartition(y=dataIn$classe, p=0.6, list=FALSE)
+trainingFull = dataIn[inTrain,]
+notTraining = dataIn[-inTrain,]
+inTest = createDataPartition(y=notTraining$classe, p=0.5, list=FALSE)
+testingFull = notTraining[inTest,]
+validationFull = notTraining[-inTest,]
+```
+
+First, let's perform some exploratory data analysis. As seen in the following plots, some of the variables are time series and others are summary statistics for the series. As a result, the columns with summary statistics have mostly NA entries. We will remove the columns with the summary statistics.
+
+```{r, echo=TRUE}
+qplot(trainingFull$X, trainingFull$roll_belt)
+qplot(trainingFull$X, trainingFull$stddev_roll_belt)
+
+colsWithNA = apply(trainingFull, 2, anyNA)
+validNamesTraining = names(trainingFull)[!colsWithNA]
+```
+
+Read in the final test set. We must NOT train on this set,but it will be important to know which variables appear in this data. Our starting set of variables for further analysis will be the minimal variable set that appears in both the training and test data, in other words, the intersection of the non-NA variables in the two sets.
+```{r, echo=TRUE}
+finalTestDataIn = read.csv('C:/Users/Ron/Documents/DataScience/datasets/PracticalMachineLearning/pml-testing.csv')
+
+testColsWithNA = apply(finalTestDataIn, 2, anyNA)
+validNamesTest = names(finalTestDataIn)[!testColsWithNA]
+
+validNames = intersect(validNamesTraining, validNamesTest)
+```
+
+The first seven variables are time stamps and other information we will not use in training. Remove those names from the list of columns with valid data.
+```{r, echo=TRUE}
+validNames = validNames[8:59]
+```
+
+Now find the data which will be used in training.
+```{r, echo=TRUE}
+training = trainingFull[, validNames]
+training$classe = trainingFull$classe
+```
+
+So that knitr can produce the output document in a reasonable amount of time, we will need a smaller training data set.In real-world use, the full training set would be used.
+```{r, echo=TRUE}
+trainingSmall = training[seq(from=1, to=length(training[,1]), by = 5),]
+```
+
+### Standardization of Variables
+We do not explicity standardize the variables because when using tree classifiers, as we do below, the results will be the same with and without standardization.
+
+## Training and Model Selection
+We now fit models to the training data and select the best, making sure that the results are cross-validated to prevent overfitting. The analogue to cross-validation for tree-based methods is resampling. We set the number of resamples to 10.
+
+```{r, echo=TRUE}
+modFit = train(classe~., method="gbm", data=trainingSmall, trControl=trainControl(number=10), verbose=FALSE)
+
+pred = predict(modFit, training)
+confusionMatrix(pred, training$classe)
+```
+
+### Analysis of Model Fit
+Now prepare the test data set, predict the values, and calculate the accuracy.
+```{r, echo=TRUE}
+testing = testingFull[, validNames]
+testing$classe = testingFull$classe
+
+predTest = predict(modFit, testing)
+confusionMatrix(predTest, testing$classe)
+```
+
+The accuracy numbers are close for the cross-validated training set and the test set, meaning that the model likely has not been overfit. Now lump the test set in with the training set, re-train, and run the model on the validation set.
+```{r, echo=TRUE}
+combinedTraining = rbind(training, testing)
+
+trainingSmall = combinedTraining[seq(from=1, to=length(combinedTraining[,1]), by = 5),]
+
+modFit = train(classe~., method="gbm", data=trainingSmall, trControl=trainControl(number=10), verbose=FALSE)
+
+validation = validationFull[, validNames]
+validation$classe = validationFull$classe
+
+predValidation = predict(modFit, validation)
+confusionMatrix(predValidation, validation$classe)
+
+```
+The prediction accuracy on the validation set is close to that on the cross-validated training set and that on the test set. This indicates that the model is probably not overfit.
+
+### Conclusion
+A boosted tree-based learning method can predict the type of barbell curl performed using data collected from belt, arm, forearm, and dumbbell accelerometer measurements. 
